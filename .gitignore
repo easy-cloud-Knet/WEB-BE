@@ -1,0 +1,3 @@
+.venv
+.env
+# Add .env file when .env was removed from past commits
