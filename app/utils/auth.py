@@ -17,7 +17,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 
 # .env 파일에서 환경 변수 로드
-load_dotenv()
+#load_dotenv()
 
 SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.example.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 587))

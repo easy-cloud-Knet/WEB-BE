@@ -7,7 +7,7 @@ import os
 from dotenv import load_dotenv
 
 # .env 파일에서 환경 변수 로드
-load_dotenv()
+#load_dotenv()
 
 SECRET_KEY = os.getenv("JWT_SECRET")
 REFRESH_SECRET_KEY = os.getenv("JWT_REFRESH_SECRET")  # Refresh Token용 Secret Key

@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 
 # .env 파일 로드
-load_dotenv()
+# load_dotenv()
 
 # 환경 변수에서 Redis 정보 가져오기
 REDIS_HOST = os.getenv("REDIS_HOST")

@@ -24,5 +24,19 @@ jobs:
         IMAGE=${{ secrets.DOCKER_HUB_USERNAME }}/kws_be:latest
         docker stop KWS_BE || true
         docker rm KWS_BE || true
-        docker run -d --name KWS_BE -p 25121:8000 $IMAGE
+        docker run -d --name KWS_BE -p 25121:8000 \
+          -e DATABASE_BACKEND=${{ secrets.DATABASE_BACKEND }} \
+          -e DATABASE_CON2BACK=${{ secrets.DATABASE_CON2BACK }} \
+          -e JWT_SECRET=${{ secrets.JWT_SECRET }} \
+          -e JWT_REFRESH_SECRET=${{ secrets.JWT_REFRESH_SECRET }} \
+          -e REDIS_HOST=${{ secrets.REDIS_HOST }} \
+          -e REDIS_PORT=${{ secrets.REDIS_PORT }} \
+          -e REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }} \
+          -e SMTP_SERVER=${{ secrets.SMTP_SERVER }} \
+          -e SMTP_PORT=${{ secrets.SMTP_PORT }} \
+          -e SENDER_EMAIL=${{ secrets.SENDER_EMAIL }} \
+          -e SENDER_PASSWORD=${{ secrets.SENDER_PASSWORD }} \
+          -e CONTROL_HOST=${{ secrets.CONTROL_HOST }} \
+          -e CONTROL_PORT=${{ secrets.CONTROL_PORT }} \
+          $IMAGE
         docker system prune -af
