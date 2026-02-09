@@ -16,12 +16,11 @@ jobs:
 
     - name: Build and tag Docker image
       run: |
-        docker build --no-cache -t ${{ secrets.DOCKER_HUB_USERNAME }}/kws_be:latest .
-        docker tag ${{ secrets.DOCKER_HUB_USERNAME }}/kws_be:latest ${{ secrets.DOCKER_HUB_USERNAME }}/kws_be:latest
+        docker build --no-cache -t kws_be:latest .
 
     - name: Deploy container locally
       run: |
-        IMAGE=${{ secrets.DOCKER_HUB_USERNAME }}/kws_be:latest
+        IMAGE=kws_be:latest
         docker stop KWS_BE || true
         docker rm KWS_BE || true
         docker run -d --name KWS_BE -p 25121:8000 \
