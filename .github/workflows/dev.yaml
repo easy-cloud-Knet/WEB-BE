@@ -1,14 +1,14 @@
-name: Build and Deploy Docker Image
+name: DEV Deploy Doddle WAS
 
 on:
   workflow_dispatch: {}
   push:
     branches:
-      - main
+      - dev
 
 jobs:
   build-and-deploy:
-    runs-on: self-hosted  # 로컬 Ubuntu의 actions 계정에서 실행됨
+    runs-on: self-hosted
 
     steps:
     - name: Checkout code
@@ -16,14 +16,14 @@ jobs:
 
     - name: Build and tag Docker image
       run: |
-        docker build --no-cache -t kws_be:latest .
+        docker build --no-cache -t doddle_be_dev:latest .
 
     - name: Deploy container locally
       run: |
-        IMAGE=kws_be:latest
-        docker stop KWS_BE || true
-        docker rm KWS_BE || true
-        docker run -d --name KWS_BE -p 25121:8000 \
+        IMAGE=doddle_be_dev:latest
+        docker stop BE_DEV || true
+        docker rm BE_DEV || true
+        docker run -d --name BE_DEV -p 25122:8000 \
           -e DATABASE_BACKEND=${{ secrets.DATABASE_BACKEND }} \
           -e DATABASE_CON2BACK=${{ secrets.DATABASE_CON2BACK }} \
           -e JWT_SECRET=${{ secrets.JWT_SECRET }} \
