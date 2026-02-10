@@ -1,4 +1,4 @@
-name: Build and Deploy Docker Image
+name: Deploy Doddle WAS
 
 on:
   workflow_dispatch: {}
@@ -16,11 +16,11 @@ jobs:
 
     - name: Build and tag Docker image
       run: |
-        docker build --no-cache -t kws_be_deploy:latest .
+        docker build --no-cache -t doddle_be_deploy:latest .
 
     - name: Deploy container locally
       run: |
-        IMAGE=kws_be_deploy:latest
+        IMAGE=doddle_be_deploy:latest
         docker stop BE_Deploy || true
         docker rm BE_Deploy || true
         docker run -d --name BE_Deploy -p 25121:8000 \
