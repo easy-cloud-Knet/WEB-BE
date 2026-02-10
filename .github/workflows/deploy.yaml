@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-and-deploy:
-    runs-on: self-hosted  # 로컬 Ubuntu의 actions 계정에서 실행됨
+    runs-on: self-hosted
 
     steps:
     - name: Checkout code

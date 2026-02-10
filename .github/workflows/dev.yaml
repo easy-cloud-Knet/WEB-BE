@@ -1,0 +1,41 @@
+name: Build and Deploy Docker Image
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+      - dev
+
+jobs:
+  build-and-deploy:
+    runs-on: self-hosted
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Build and tag Docker image
+      run: |
+        docker build --no-cache -t kws_be:latest .
+
+    - name: Deploy container locally
+      run: |
+        IMAGE=kws_be:latest
+        docker stop KWS_BE || true
+        docker rm KWS_BE || true
+        docker run -d --name KWS_BE -p 25122:8000 \
+          -e DATABASE_BACKEND=${{ secrets.DATABASE_BACKEND }} \
+          -e DATABASE_CON2BACK=${{ secrets.DATABASE_CON2BACK }} \
+          -e JWT_SECRET=${{ secrets.JWT_SECRET }} \
+          -e JWT_REFRESH_SECRET=${{ secrets.JWT_REFRESH_SECRET }} \
+          -e REDIS_HOST=${{ secrets.REDIS_HOST }} \
+          -e REDIS_PORT=${{ secrets.REDIS_PORT }} \
+          -e REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }} \
+          -e SMTP_SERVER=${{ secrets.SMTP_SERVER }} \
+          -e SMTP_PORT=${{ secrets.SMTP_PORT }} \
+          -e SENDER_EMAIL=${{ secrets.SENDER_EMAIL }} \
+          -e SENDER_PASSWORD=${{ secrets.SENDER_PASSWORD }} \
+          -e CONTROL_HOST=${{ secrets.CONTROL_HOST }} \
+          -e CONTROL_PORT=${{ secrets.CONTROL_PORT }} \
+          $IMAGE
+        docker system prune -af
