@@ -16,14 +16,14 @@ jobs:
 
     - name: Build and tag Docker image
       run: |
-        docker build --no-cache -t kws_be:latest .
+        docker build --no-cache -t kws_be_dev:latest .
 
     - name: Deploy container locally
       run: |
-        IMAGE=kws_be:latest
-        docker stop KWS_BE || true
-        docker rm KWS_BE || true
-        docker run -d --name KWS_BE -p 25122:8000 \
+        IMAGE=kws_be_dev:latest
+        docker stop BE_DEV || true
+        docker rm BE_DEV || true
+        docker run -d --name BE_DEV -p 25122:8000 \
           -e DATABASE_BACKEND=${{ secrets.DATABASE_BACKEND }} \
           -e DATABASE_CON2BACK=${{ secrets.DATABASE_CON2BACK }} \
           -e JWT_SECRET=${{ secrets.JWT_SECRET }} \
