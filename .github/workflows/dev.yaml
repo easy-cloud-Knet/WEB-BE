@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - dev
+      - fix_db_connection_expiry
 
 jobs:
   build-and-deploy:

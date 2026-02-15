@@ -15,7 +15,7 @@ class Database:
 
     def init_database(self):
         try:
-            self.engine = create_engine(self.url, echo=True)
+            self.engine = create_engine(self.url, echo=True, pool_pre_ping=True, pool_recycle=1800, pool_timeout=30)
             metadata = MetaData()
             metadata.reflect(self.engine, only=self.tables)
             self.Base.prepare(self.engine, reflect=True)
