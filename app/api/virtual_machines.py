@@ -552,6 +552,9 @@ async def add_shared_user(
     user = db.query(User).filter(User.email == email).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.id == current_user:
+        raise HTTPException(status_code=400, detail="Cannot invite yourself")
 
     exists = db.query(VmSharedUsers).filter(
         VmSharedUsers.vm_id == vm_id,
