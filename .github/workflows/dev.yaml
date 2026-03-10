@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - dev
+      - finish_shared_user_feature
 
 jobs:
   build-and-deploy:
