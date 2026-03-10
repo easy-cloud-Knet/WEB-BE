@@ -561,10 +561,15 @@ async def add_shared_user(
         VmSharedUsers.user_id == user.id
     ).first()
     if exists:
-        raise HTTPException(status_code=400, detail="User already invited")
+        if exists.status in ("pending", "accepted"):
+            raise HTTPException(status_code=400, detail="User already invited or accepted")
+        elif exists.status == "rejected":
+            exists.status = "pending"
+            exists.created_at = datetime.now(timezone.utc)
+            db.commit()
+            return {"msg": "Re-invitation sent (pending)"}
 
     shared_entry = VmSharedUsers(
-        id=str(uuid.uuid4()),
         vm_id=vm_id,
         user_id=user.id,
         status="pending"
