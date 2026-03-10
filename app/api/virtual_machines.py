@@ -376,38 +376,57 @@ async def get_all_vms(
     if cached_vms:
         vms = json.loads(cached_vms)
     else:
-        # Owner 또는 Shared User에 해당하는 VM 모두 가져오기
-        vms_query = (
-            db.query(VMs, VmSharedUsers.user_id.label("shared_user_id"))
-            .outerjoin(VmSharedUsers, VMs.vm_id == VmSharedUsers.vm_id)
+        # owner VM 조회
+        owned_vms = db.query(VMs).filter(VMs.owner_id == current_user).all()
+
+        # accepted 상태로 공유된 VM ID 조회
+        accepted_shared_vm_ids = (
+            db.query(VmSharedUsers.vm_id)
             .filter(
-                or_(
-                    VMs.owner_id == current_user,
-                    VmSharedUsers.user_id == current_user
-                )
+                VmSharedUsers.user_id == current_user,
+                VmSharedUsers.status == "accepted"
             )
             .all()
         )
+        accepted_shared_vm_ids = [row.vm_id for row in accepted_shared_vm_ids]
+
+        # 공유된 VM 중 owner가 아닌 것만 추가 (중복 방지)
+        shared_vms = []
+        if accepted_shared_vm_ids:
+            shared_vms = (
+                db.query(VMs)
+                .filter(
+                    VMs.vm_id.in_(accepted_shared_vm_ids),
+                    VMs.owner_id != current_user
+                )
+                .all()
+            )
 
         vms = []
-        for vm, _ in vms_query:
-            # owner 여부 판별
-            is_owner = (vm.owner_id == current_user)
-
-            # instance_type, os 상세 정보 조회
+        for vm in owned_vms:
             instance_type_info = db_con2.query(InstanceTypes).filter(InstanceTypes.id == vm.instance_type).first()
             os_info = db_con2.query(OsList).filter(OsList.id == vm.os).first()
-
             vms.append({
                 "vm_id": vm.vm_id,
                 "vm_name": vm.vm_name,
-                "is_owner": "admin" if is_owner else "user",
+                "is_owner": "admin",
                 "instance_type": instance_type_info.typename if instance_type_info else None,
                 "os": os_info.name if os_info else None,
                 "now": int(datetime.now(timezone.utc).timestamp())
             })
 
-        # DB 캐싱 (30초 TTL, write 허용)
+        for vm in shared_vms:
+            instance_type_info = db_con2.query(InstanceTypes).filter(InstanceTypes.id == vm.instance_type).first()
+            os_info = db_con2.query(OsList).filter(OsList.id == vm.os).first()
+            vms.append({
+                "vm_id": vm.vm_id,
+                "vm_name": vm.vm_name,
+                "is_owner": "user",
+                "instance_type": instance_type_info.typename if instance_type_info else None,
+                "os": os_info.name if os_info else None,
+                "now": int(datetime.now(timezone.utc).timestamp())
+            })
+
         redis_client.setex(vm_cache_key, 30, json.dumps(vms))
 
     # 2. VM 상태+IP는 Redis에서 **읽기만**
