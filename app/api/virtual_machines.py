@@ -746,8 +746,11 @@ async def verify_admin_change(
     if not req:
         raise HTTPException(status_code=404, detail="No pending admin change request found")
 
+    created_at = req.created_at
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
     # 7일 이상 지난 요청은 자동 거절
-    if req.created_at < datetime.utcnow() - timedelta(days=7):
+    if created_at < datetime.utcnow() - timedelta(days=7):
         req.status = "rejected"
         db.commit()
         raise HTTPException(status_code=400, detail="Admin change request expired and rejected")
