@@ -71,6 +71,7 @@ class VMNameUpdate(BaseModel):
 class VMStateUpdate(BaseModel):
     state: str
 
+
 # ── VM requirements ───────────────────────────────────────────────────────────
 
 @router.get("/", summary="VM 생성 옵션 조회")
@@ -128,11 +129,8 @@ async def create_vm(
         raise HTTPException(status_code=500, detail="Control 서버와 통신 실패")
 
     new_vm = VMs(
-        vm_id=vm_id,
-        owner_id=current_user,
-        vm_name=data.name,
-        instance_type=data.type_id,
-        os=data.os_id
+        vm_id=vm_id, owner_id=current_user, vm_name=data.name,
+        instance_type=data.type_id, os=data.os_id
     )
     db_web.add(new_vm)
     db_web.commit()
@@ -154,11 +152,8 @@ async def delete_vm(
     db.commit()
 
     try:
-        requests.delete(
-            f"{CONTROL_URL}/vm",
-            json={"uuid": vm_id},
-            headers={"Content-Type": "application/json"}
-        )
+        requests.delete(f"{CONTROL_URL}/vm", json={"uuid": vm_id},
+                        headers={"Content-Type": "application/json"})
     except requests.exceptions.RequestException:
         pass
 
@@ -352,6 +347,19 @@ async def get_vm_connection_info(
 
 
 # ── Shared users ──────────────────────────────────────────────────────────────
+#
+# 라우트 등록 순서 규칙 (FastAPI first-match wins):
+#   정적 경로(/leave, /accept, /reject, /invitations)를
+#   동적 경로(/{user_id})보다 반드시 먼저 등록해야 함.
+#
+# 전체 플로우:
+#   1. admin이 초대       POST   /{vm_id}/shared-users
+#   2. user가 초대 확인   GET    /shared-users/invitations 
+#   3. user가 수락        PATCH  /{vm_id}/shared-users/accept
+#   4. user가 거절        PATCH  /{vm_id}/shared-users/reject
+#   5. user가 자발 탈퇴   DELETE /{vm_id}/shared-users/leave 
+#   6. admin이 강제 제거  DELETE /{vm_id}/shared-users/{user_id}
+#   7. 목록 조회          GET    /{vm_id}/shared-users
 
 @router.post("/{vm_id}/shared-users", summary="공유 사용자 초대")
 async def add_shared_user(
@@ -387,6 +395,32 @@ async def add_shared_user(
     db.add(VmSharedUsers(vm_id=vm_id, user_id=user.id, status="pending"))
     db.commit()
     return {"msg": "Invitation sent (pending)"}
+
+@router.get("/shared-users/invitations", summary="내게 온 초대 목록 조회")
+async def get_my_invitations(
+    db: Session = Depends(get_db_web),
+    current_user=Depends(get_current_user)
+):
+    rows = (
+        db.query(VmSharedUsers, VMs)
+        .join(VMs, VmSharedUsers.vm_id == VMs.vm_id)
+        .filter(VmSharedUsers.user_id == current_user)
+        .order_by(VmSharedUsers.created_at.desc())
+        .all()
+    )
+
+    return {
+        "invitations": [
+            {
+                "vm_id":      entry.vm_id,
+                "vm_name":    vm.vm_name,
+                "owner_id":   vm.owner_id,
+                "status":     entry.status,
+                "invited_at": entry.created_at,
+            }
+            for entry, vm in rows
+        ]
+    }
 
 
 @router.patch("/{vm_id}/shared-users/accept", summary="공유 초대 수락")
@@ -436,7 +470,32 @@ async def reject_shared_user_invite(
     return {"msg": "Invitation rejected"}
 
 
-@router.delete("/{vm_id}/shared-users/{user_id}", summary="공유 사용자 제거 (admin 전용)")
+@router.delete("/{vm_id}/shared-users/leave", summary="공유 VM에서 자발적 탈퇴")
+async def leave_shared_vm(
+    vm_id: str,
+    db: Session = Depends(get_db_web),
+    current_user=Depends(get_current_user)
+):
+    vm = db.query(VMs).filter(VMs.vm_id == vm_id).first()
+    if not vm:
+        raise HTTPException(status_code=404, detail="VM not found")
+
+    if vm.owner_id == current_user:
+        raise HTTPException(status_code=400, detail="Owner cannot leave. Use admin transfer instead.")
+
+    shared_entry = db.query(VmSharedUsers).filter(
+        VmSharedUsers.vm_id == vm_id,
+        VmSharedUsers.user_id == current_user
+    ).first()
+    if not shared_entry:
+        raise HTTPException(status_code=404, detail="You are not a shared user of this VM")
+
+    db.delete(shared_entry)
+    db.commit()
+    return {"msg": "Successfully left the shared VM"}
+
+
+@router.delete("/{vm_id}/shared-users/{user_id}", summary="공유 사용자 강제 제거 (admin 전용)")
 async def remove_shared_user(
     vm_id: str,
     user_id: str,
@@ -470,7 +529,6 @@ async def get_shared_users(
     if not vm:
         raise HTTPException(status_code=404, detail="VM not found")
 
-    # admin 또는 accepted 상태의 공유 사용자만 목록 조회 허용
     is_shared = db.query(VmSharedUsers).filter(
         VmSharedUsers.vm_id == vm_id,
         VmSharedUsers.user_id == current_user,
