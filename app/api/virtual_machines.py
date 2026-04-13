@@ -396,21 +396,34 @@ async def add_shared_user(
     db.commit()
     return {"msg": "Invitation sent (pending)"}
 
-@router.get("/shared-users/invitations", summary="내게 온 초대 목록 조회")
+@router.get("/shared-users/invitations", summary="나에게 온 공유 초대 및 관리자 변경 요청 목록 조회")
 async def get_my_invitations(
     db: Session = Depends(get_db_web),
     current_user=Depends(get_current_user)
 ):
-    rows = (
+    # 공유 사용자 초대 목록
+    shared_rows = (
         db.query(VmSharedUsers, VMs)
         .join(VMs, VmSharedUsers.vm_id == VMs.vm_id)
         .filter(VmSharedUsers.user_id == current_user)
         .order_by(VmSharedUsers.created_at.desc())
         .all()
     )
-
+ 
+    # 관리자 변경 요청 목록 (pending만)
+    admin_rows = (
+        db.query(VmAdminChangeRequest, VMs)
+        .join(VMs, VmAdminChangeRequest.vm_id == VMs.vm_id)
+        .filter(
+            VmAdminChangeRequest.new_admin_id == current_user,
+            VmAdminChangeRequest.status == "pending"
+        )
+        .order_by(VmAdminChangeRequest.created_at.desc())
+        .all()
+    )
+ 
     return {
-        "invitations": [
+        "shared_user_invitations": [
             {
                 "vm_id":      entry.vm_id,
                 "vm_name":    vm.vm_name,
@@ -418,8 +431,17 @@ async def get_my_invitations(
                 "status":     entry.status,
                 "invited_at": entry.created_at,
             }
-            for entry, vm in rows
-        ]
+            for entry, vm in shared_rows
+        ],
+        "admin_change_requests": [
+            {
+                "vm_id":        req.vm_id,
+                "vm_name":      vm.vm_name,
+                "old_admin_id": req.old_admin_id,
+                "requested_at": req.created_at,
+            }
+            for req, vm in admin_rows
+        ],
     }
 
 
@@ -567,19 +589,19 @@ async def request_admin_change(
     vm = db.query(VMs).filter(VMs.vm_id == vm_id, VMs.owner_id == current_user).first()
     if not vm:
         raise HTTPException(status_code=403, detail="Only current admin can request admin change")
-
+ 
     new_admin = db.query(User).filter(User.email == new_admin_email).first()
     if not new_admin:
         raise HTTPException(status_code=404, detail="New admin user not found")
-
+ 
     existing = db.query(VmAdminChangeRequest).filter(
         VmAdminChangeRequest.vm_id == vm_id, VmAdminChangeRequest.status == "pending"
     ).first()
     if existing:
         raise HTTPException(status_code=400, detail="There is already a pending admin change request")
-
+ 
     send_verification_email(new_admin.email, db)
-
+ 
     db.add(VmAdminChangeRequest(
         vm_id=vm_id, old_admin_id=current_user, new_admin_id=new_admin.id, status="pending"
     ))
