@@ -60,7 +60,7 @@ def decode_refresh_token(token: str):
             detail="Invalid refresh token"
         )
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/users/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/users/token")
 
 # 현재 유저 확인
 def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
