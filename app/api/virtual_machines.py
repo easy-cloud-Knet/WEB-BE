@@ -144,9 +144,11 @@ async def delete_vm(
     db: Session = Depends(get_db_web),
     current_user=Depends(get_current_user)
 ):
-    vm = db.query(VMs).filter(VMs.vm_id == vm_id, VMs.owner_id == current_user).first()
+    vm = db.query(VMs).filter(VMs.vm_id == vm_id).first()
     if not vm:
         raise HTTPException(status_code=404, detail="VM not found")
+    if vm.owner_id != current_user:
+        raise HTTPException(status_code=403, detail="Only the VM owner can delete it")
 
     db.delete(vm)
     db.commit()
@@ -167,9 +169,11 @@ async def change_vm_name(
     db: Session = Depends(get_db_web),
     current_user=Depends(get_current_user)
 ):
-    vm = db.query(VMs).filter(VMs.vm_id == vm_id, VMs.owner_id == current_user).first()
+    vm = db.query(VMs).filter(VMs.vm_id == vm_id).first()
     if not vm:
-        raise HTTPException(status_code=404, detail="VM not found or not owned by user")
+        raise HTTPException(status_code=404, detail="VM not found")
+    if vm.owner_id != current_user:
+        raise HTTPException(status_code=403, detail="Only the VM owner can rename it")
 
     vm.vm_name = payload.new_name
     db.commit()
