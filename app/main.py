@@ -48,6 +48,12 @@ async def metrics_and_cors_middleware(request: Request, call_next):
     logging.debug(f"Request origin: {request.headers.get('origin')}")
     response = await call_next(request)
 
+    origin = request.headers.get('origin')
+    if origin in origins:
+        response.headers["Access-Control-Allow-Origin"] = origin
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
     logging.debug(f"Response headers: {response.headers}")
 
     # Prometheus metrics 기록
