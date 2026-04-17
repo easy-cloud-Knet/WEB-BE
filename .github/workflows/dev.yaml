@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - dev
-      - finish_shared_user_feature
 
 jobs:
   build-and-deploy:
@@ -25,7 +24,7 @@ jobs:
         docker stop BE_DEV || true
         docker rm BE_DEV || true
         docker run -d --name BE_DEV -p 25122:8000 \
-          -e DATABASE_BACKEND=${{ secrets.DATABASE_BACKEND_TEST }} \
+          -e DATABASE_BACKEND=${{ secrets.DATABASE_BACKEND }} \
           -e DATABASE_CON2BACK=${{ secrets.DATABASE_CON2BACK }} \
           -e JWT_SECRET=${{ secrets.JWT_SECRET }} \
           -e JWT_REFRESH_SECRET=${{ secrets.JWT_REFRESH_SECRET }} \
