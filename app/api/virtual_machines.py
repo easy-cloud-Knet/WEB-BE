@@ -616,8 +616,7 @@ async def request_admin_change(
 @router.post("/{vm_id}/admin/verify", summary="관리자 변경 코드 검증 및 확정")
 async def verify_admin_change(
     vm_id: str,
-    email: str,
-    code: str,
+    code: str, 
     db: Session = Depends(get_db_web),
     current_user=Depends(get_current_user)
 ):
@@ -639,7 +638,7 @@ async def verify_admin_change(
     if not new_admin or new_admin.id != current_user:
         raise HTTPException(status_code=403, detail="Only the invited admin can verify")
 
-    if not verify_code(email, code, db):
+    if not verify_code(new_admin.email, code, db): 
         raise HTTPException(status_code=400, detail="Invalid verification code")
 
     vm = db.query(VMs).filter(VMs.vm_id == vm_id).first()
