@@ -541,7 +541,6 @@ async def remove_shared_user(
     db.commit()
     return {"msg": "Shared user removed"}
 
-
 @router.get("/{vm_id}/shared-users", summary="공유 사용자 목록 조회")
 async def get_shared_users(
     vm_id: str,
@@ -551,32 +550,37 @@ async def get_shared_users(
     vm = db.query(VMs).filter(VMs.vm_id == vm_id).first()
     if not vm:
         raise HTTPException(status_code=404, detail="VM not found")
-
+ 
     is_shared = db.query(VmSharedUsers).filter(
         VmSharedUsers.vm_id == vm_id,
         VmSharedUsers.user_id == current_user,
         VmSharedUsers.status == "accepted"
     ).first()
-
+ 
     if vm.owner_id != current_user and not is_shared:
         raise HTTPException(status_code=403, detail="You are not allowed to see shared users")
-
+ 
     shared_users = (
         db.query(User.id, User.username, User.email, VmSharedUsers.status, VmSharedUsers.created_at)
         .join(VmSharedUsers, User.id == VmSharedUsers.user_id)
         .filter(VmSharedUsers.vm_id == vm_id)
         .all()
     )
-
+ 
+    admin = db.query(User).filter(User.id == vm.owner_id).first()
+ 
     return {
-        "admin": vm.owner_id,
+        "admin": {
+            "username": admin.username if admin else None,
+            "email":    admin.email    if admin else None,
+        },
+        "is_admin": vm.owner_id == current_user,
         "shared_users": [
-            {"id": u.id, "username": u.username, "email": u.email,
+            {"username": u.username, "email": u.email,
              "status": u.status, "invited_at": u.created_at}
             for u in shared_users
         ]
     }
-
 
 # ── Admin transfer ────────────────────────────────────────────────────────────
 
