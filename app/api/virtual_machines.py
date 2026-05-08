@@ -435,6 +435,7 @@ async def get_my_invitations(
                 "vm_id":        entry.vm_id,
                 "vm_name":      vm.vm_name,
                 "owner_name":   owner.username,
+                "owner_email":  owner.email,
                 "status":       entry.status,
                 "invited_at":   entry.created_at,
             }
@@ -445,6 +446,7 @@ async def get_my_invitations(
                 "vm_id":          req.vm_id,
                 "vm_name":        vm.vm_name,
                 "old_admin_name": old_admin.username,
+                "old_admin_email": old_admin.email,
                 "requested_at":   req.created_at,
             }
             for req, vm, old_admin in admin_rows
