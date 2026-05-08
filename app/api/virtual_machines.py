@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 from app.utils.verification import get_current_user
 from app.utils.auth import send_verification_email, verify_code
 from app.utils.database.web_backend.database import get_db as get_db_web
@@ -403,19 +403,24 @@ async def get_my_invitations(
     db: Session = Depends(get_db_web),
     current_user=Depends(get_current_user)
 ):
-    # 공유 사용자 초대 목록
+    # owner User를 alias로 join
+    Owner = aliased(User)
+
     shared_rows = (
-        db.query(VmSharedUsers, VMs)
+        db.query(VmSharedUsers, VMs, Owner)
         .join(VMs, VmSharedUsers.vm_id == VMs.vm_id)
+        .join(Owner, VMs.owner_id == Owner.id)
         .filter(VmSharedUsers.user_id == current_user)
         .order_by(VmSharedUsers.created_at.desc())
         .all()
     )
- 
-    # 관리자 변경 요청 목록 (pending만)
+
+    OldAdmin = aliased(User)
+
     admin_rows = (
-        db.query(VmAdminChangeRequest, VMs)
+        db.query(VmAdminChangeRequest, VMs, OldAdmin)
         .join(VMs, VmAdminChangeRequest.vm_id == VMs.vm_id)
+        .join(OldAdmin, VmAdminChangeRequest.old_admin_id == OldAdmin.id)
         .filter(
             VmAdminChangeRequest.new_admin_id == current_user,
             VmAdminChangeRequest.status == "pending"
@@ -423,29 +428,28 @@ async def get_my_invitations(
         .order_by(VmAdminChangeRequest.created_at.desc())
         .all()
     )
- 
+
     return {
         "shared_user_invitations": [
             {
-                "vm_id":      entry.vm_id,
-                "vm_name":    vm.vm_name,
-                "owner_id":   vm.owner_id,
-                "status":     entry.status,
-                "invited_at": entry.created_at,
+                "vm_id":        entry.vm_id,
+                "vm_name":      vm.vm_name,
+                "owner_name":   owner.username,
+                "status":       entry.status,
+                "invited_at":   entry.created_at,
             }
-            for entry, vm in shared_rows
+            for entry, vm, owner in shared_rows
         ],
         "admin_change_requests": [
             {
-                "vm_id":        req.vm_id,
-                "vm_name":      vm.vm_name,
-                "old_admin_id": req.old_admin_id,
-                "requested_at": req.created_at,
+                "vm_id":          req.vm_id,
+                "vm_name":        vm.vm_name,
+                "old_admin_name": old_admin.username,
+                "requested_at":   req.created_at,
             }
-            for req, vm in admin_rows
+            for req, vm, old_admin in admin_rows
         ],
     }
-
 
 @router.patch("/{vm_id}/shared-users/accept", summary="공유 초대 수락")
 async def accept_shared_user_invite(
