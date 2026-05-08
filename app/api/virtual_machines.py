@@ -64,6 +64,7 @@ class CreateReq(BaseModel):
     os_id: int
     ip: str
     type_id: int
+    amount: int
 
 class VMNameUpdate(BaseModel):
     new_name: str
