@@ -573,11 +573,16 @@ async def get_shared_users(
         "admin": {
             "username": admin.username if admin else None,
             "email":    admin.email    if admin else None,
+            "is_me":    vm.owner_id == current_user,
         },
-        "is_admin": vm.owner_id == current_user,
         "shared_users": [
-            {"username": u.username, "email": u.email,
-             "status": u.status, "invited_at": u.created_at}
+            {
+                "username":  u.username,
+                "email":     u.email,
+                "status":    u.status,
+                "invited_at": u.created_at,
+                "is_me":     u.id == current_user,
+            }
             for u in shared_users
         ]
     }
