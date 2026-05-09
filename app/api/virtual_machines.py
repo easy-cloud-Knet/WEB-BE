@@ -525,10 +525,10 @@ async def leave_shared_vm(
     return {"msg": "Successfully left the shared VM"}
 
 
-@router.delete("/{vm_id}/shared-users/{user_id}", summary="공유 사용자 강제 제거 (admin 전용)")
+@router.delete("/{vm_id}/shared-users/{user_email}", summary="공유 사용자 강제 제거 (admin 전용)")
 async def remove_shared_user(
     vm_id: str,
-    user_id: str,
+    user_email: str,
     db: Session = Depends(get_db_web),
     current_user=Depends(get_current_user)
 ):
@@ -538,8 +538,12 @@ async def remove_shared_user(
     if vm.owner_id != current_user:
         raise HTTPException(status_code=403, detail="Only admin can remove shared users")
 
+    user = db.query(User).filter(User.email == user_email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
     shared_entry = db.query(VmSharedUsers).filter(
-        VmSharedUsers.vm_id == vm_id, VmSharedUsers.user_id == user_id
+        VmSharedUsers.vm_id == vm_id, VmSharedUsers.user_id == user.id
     ).first()
     if not shared_entry:
         raise HTTPException(status_code=404, detail="Shared user not found")
