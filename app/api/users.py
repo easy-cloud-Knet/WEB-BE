@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.utils.auth import get_password_hash, verify_password, send_verification_email, verify_code
 from app.utils.verification import (
@@ -14,27 +15,63 @@ router = APIRouter()
 class basic_info(BaseModel):
     username: str
     email: str
-
+ 
 class register_info(basic_info):
     password: str
-
+ 
 class email(BaseModel):
     email: str
-
+ 
 class email_with_purpose(email):
     purpose: str
-
+ 
 class info_with_code(basic_info):
     code: str
-
+ 
 class email_with_code(email):
     code: str
-
-class change_password_info(info_with_code):
+ 
+class change_password_info(email_with_code):
     new_password: str
-
+ 
 class no_name_info(email):
     password: str
+ 
+class reset_password_info(email_with_code):
+    new_password: str
+
+
+@router.post(
+    "/token",
+    summary="Swagger UI 전용 OAuth2 토큰 발급",
+    description="Swagger UI Authorize 버튼용 엔드포인트. **username 필드에 이메일을 입력**하세요.",
+    include_in_schema=True,
+)
+async def token_for_swagger(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db)
+):
+    # OAuth2PasswordRequestForm의 username 필드에 email을 받음
+    user = db.query(User).filter(User.email == form_data.username).first()
+ 
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if not verify_password(form_data.password, user.password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+ 
+    access_token = create_access_token(payload={"user_id": user.id})
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+    }
 
 @router.post("/login")
 async def login(data: no_name_info, db: Session = Depends(get_db)):
@@ -122,15 +159,18 @@ async def change_password(
 
 # 비밀번호 재설정 (이메일 인증 필요)
 @router.post("/reset-password")
-async def reset_password(data: info_with_code, db: Session = Depends(get_db)):
-    if not verify_code(data.email, data.code):
+async def reset_password(data: reset_password_info, db: Session = Depends(get_db)):
+    # FIX: db 인자 추가
+    if not verify_code(data.email, data.code, db):
         raise HTTPException(status_code=400, detail="Invalid verification code")
-    
-    user = db.query(User).filter(User.email == email).first()
+ 
+    # FIX: email 클래스 참조 → data.email
+    user = db.query(User).filter(User.email == data.email).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
-    user.password = get_password_hash(data.password)
+ 
+    # FIX: data.password 없음 → data.new_password 사용
+    user.password = get_password_hash(data.new_password)
     db.commit()
     return {"msg": "Password reset successfully"}
 
