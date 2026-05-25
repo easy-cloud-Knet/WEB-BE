@@ -549,8 +549,7 @@ async def _fetch_invitations_snapshot(current_user: int) -> dict:
 
 def _fetch_invitations_sync(current_user: int) -> dict:
     """기존 get_my_invitations 로직 재사용 (동기 버전)"""
-    from app.utils.database.web_backend.database import SessionLocal
-    db = SessionLocal()
+    db = get_db_web()
     try:
         Owner = aliased(User)
         shared_rows = (
