@@ -463,7 +463,6 @@ async_redis_client = aioredis.StrictRedis(
     host=REDIS_HOST,
     port=REDIS_PORT,
     db=0,
-    password=REDIS_PASSWORD,
     decode_responses=True,
 )
 
