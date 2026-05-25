@@ -466,6 +466,10 @@ async_redis_client = aioredis.StrictRedis(
     decode_responses=True,
 )
 
+def _sse_format(event: str, data) -> str:
+    body = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False, default=str)
+    return f"event: {event}\ndata: {body}\n\n"
+
 @router.get("/shared-users/invitations/stream", summary="초대 실시간 스트림 (SSE)")
 async def stream_my_invitations(
     request: Request,
