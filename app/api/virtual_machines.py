@@ -463,7 +463,6 @@ async_redis_client = aioredis.StrictRedis(
     host=REDIS_HOST,
     port=REDIS_PORT,
     db=0,
-    password=REDIS_PASSWORD or None,   # ← 버그 2 수정
     decode_responses=True,
 )
 
@@ -554,7 +553,7 @@ def _fetch_invitations_sync(current_user: int) -> dict:
     finally:
         db.close()
 
-        
+
 
 @router.patch("/{vm_id}/shared-users/accept", summary="공유 초대 수락")
 async def accept_shared_user_invite(
