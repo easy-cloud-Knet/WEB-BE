@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, aliased
 from app.utils.verification import get_current_user
 from app.utils.auth import send_verification_email, verify_code
@@ -8,11 +9,14 @@ from app.utils.database.control_to_backend.database import get_db as get_db_con2
 from app.utils.database.control_to_backend.models import InstanceTypes, OsList
 import uuid
 import redis
+import redis.asyncio as aioredis
 from pydantic import BaseModel
 from typing import List
 import requests, json
 import os
 from datetime import datetime, timedelta, timezone
+import asyncio
+
 
 REDIS_HOST = os.getenv("REDIS_HOST")
 REDIS_PORT = int(os.getenv("REDIS_PORT"))
@@ -452,6 +456,152 @@ async def get_my_invitations(
             for req, vm, old_admin in admin_rows
         ],
     }
+
+## SSE invitations
+
+async_redis_client = aioredis.StrictRedis(
+    host=REDIS_HOST,
+    port=REDIS_PORT,
+    db=0,
+    password=REDIS_PASSWORD,
+    decode_responses=True,
+)
+
+@router.get(
+    "/shared-users/invitations/stream",
+    summary="나에게 오는 공유 초대·관리자 변경 요청 실시간 스트림 (SSE)",
+)
+async def stream_my_invitations(
+    request: Request,
+    current_user=Depends(get_current_user),
+):
+    """
+    연결 즉시 현재 초대 목록을 snapshot으로 전송하고,
+    이후 새 초대·관리자 변경 요청이 발행될 때마다 이벤트를 push합니다.
+
+    이벤트 종류:
+      - event: snapshot   → 연결 시점의 전체 초대 목록 (data: JSON)
+      - event: invitation → 새 공유 초대 (data: JSON)
+      - event: admin_req  → 새 관리자 변경 요청 (data: JSON)
+      - event: ping       → 30초마다 연결 유지용 heartbeat (data: "")
+    """
+    channel = f"user:{current_user}:invitations"
+
+    async def event_generator():
+        pubsub = async_redis_client.pubsub()
+        await pubsub.subscribe(channel)
+
+        try:
+            # 1) 연결 즉시 snapshot 전송 (현재 목록을 한 번 내려줌)
+            snapshot = await _fetch_invitations_snapshot(current_user)
+            yield _sse_format("snapshot", snapshot)
+
+            # 2) 이후 Redis Pub/Sub 메시지 대기
+            while True:
+                if await request.is_disconnected():
+                    break
+
+                try:
+                    message = await asyncio.wait_for(
+                        pubsub.get_message(ignore_subscribe_messages=True),
+                        timeout=30.0,
+                    )
+                except asyncio.TimeoutError:
+                    # 30초마다 heartbeat (프록시·로드밸런서 연결 끊김 방지)
+                    yield _sse_format("ping", "")
+                    continue
+
+                if message and message["type"] == "message":
+                    try:
+                        payload = json.loads(message["data"])
+                        event_type = payload.get("event", "invitation")
+                        yield _sse_format(event_type, payload.get("data", {}))
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await pubsub.unsubscribe(channel)
+            await pubsub.aclose()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",   # Nginx 버퍼링 비활성화
+            "Connection": "keep-alive",
+        },
+    )
+
+def _sse_format(event: str, data) -> str:
+    """SSE 표준 포맷으로 직렬화"""
+    body = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False, default=str)
+    return f"event: {event}\ndata: {body}\n\n"
+
+async def _fetch_invitations_snapshot(current_user: int) -> dict:
+    """
+    비동기 컨텍스트에서 DB 조회가 필요하므로
+    동기 세션을 별도 thread pool에서 실행합니다.
+    """
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _fetch_invitations_sync, current_user)
+
+def _fetch_invitations_sync(current_user: int) -> dict:
+    """기존 get_my_invitations 로직 재사용 (동기 버전)"""
+    from app.utils.database.web_backend.database import SessionLocal
+    db = SessionLocal()
+    try:
+        Owner = aliased(User)
+        shared_rows = (
+            db.query(VmSharedUsers, VMs, Owner)
+            .join(VMs, VmSharedUsers.vm_id == VMs.vm_id)
+            .join(Owner, VMs.owner_id == Owner.id)
+            .filter(VmSharedUsers.user_id == current_user)
+            .order_by(VmSharedUsers.created_at.desc())
+            .all()
+        )
+
+        OldAdmin = aliased(User)
+        admin_rows = (
+            db.query(VmAdminChangeRequest, VMs, OldAdmin)
+            .join(VMs, VmAdminChangeRequest.vm_id == VMs.vm_id)
+            .join(OldAdmin, VmAdminChangeRequest.old_admin_id == OldAdmin.id)
+            .filter(
+                VmAdminChangeRequest.new_admin_id == current_user,
+                VmAdminChangeRequest.status == "pending",
+            )
+            .order_by(VmAdminChangeRequest.created_at.desc())
+            .all()
+        )
+
+        return {
+            "shared_user_invitations": [
+                {
+                    "vm_id":       e.vm_id,
+                    "vm_name":     vm.vm_name,
+                    "owner_name":  owner.username,
+                    "owner_email": owner.email,
+                    "status":      e.status,
+                    "invited_at":  e.created_at.isoformat() if e.created_at else None,
+                }
+                for e, vm, owner in shared_rows
+            ],
+            "admin_change_requests": [
+                {
+                    "vm_id":           req.vm_id,
+                    "vm_name":         vm.vm_name,
+                    "old_admin_name":  old_admin.username,
+                    "old_admin_email": old_admin.email,
+                    "requested_at":    req.created_at.isoformat() if req.created_at else None,
+                }
+                for req, vm, old_admin in admin_rows
+            ],
+        }
+    finally:
+        db.close()
+
 
 @router.patch("/{vm_id}/shared-users/accept", summary="공유 초대 수락")
 async def accept_shared_user_invite(
