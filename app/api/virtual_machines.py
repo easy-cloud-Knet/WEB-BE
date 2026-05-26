@@ -434,27 +434,28 @@ async def get_my_invitations(
     )
 
     return {
-        "shared_user_invitations": [
+        "pending_requests": [
             {
-                "vm_id":        entry.vm_id,
-                "vm_name":      vm.vm_name,
-                "owner_name":   owner.username,
-                "owner_email":  owner.email,
-                "status":       entry.status,
-                "invited_at":   entry.created_at,
+                "request_type":   "shared_user_invitation",
+                "vm_id":          entry.vm_id,
+                "vm_name":        vm.vm_name,
+                "owner_name":     owner.username,
+                "owner_email":    owner.email,
+                "status":         entry.status,
+                "invited_at":     entry.created_at,
             }
             for entry, vm, owner in shared_rows
-        ],
-        "admin_change_requests": [
+        ] + [
             {
-                "vm_id":          req.vm_id,
-                "vm_name":        vm.vm_name,
-                "old_admin_name": old_admin.username,
+                "request_type":    "admin_change_request",
+                "vm_id":           req.vm_id,
+                "vm_name":         vm.vm_name,
+                "old_admin_name":  old_admin.username,
                 "old_admin_email": old_admin.email,
-                "requested_at":   req.created_at,
+                "requested_at":    req.created_at,
             }
             for req, vm, old_admin in admin_rows
-        ],
+        ]
     }
 
 ## SSE invitations
@@ -520,7 +521,7 @@ async def stream_my_invitations(
 
 
 def _fetch_invitations_sync(current_user: int) -> dict:
-    db = next(get_db_web())          # ← 버그 1 수정
+    db = next(get_db_web())
     try:
         Owner = aliased(User)
         shared_rows = (
@@ -541,18 +542,28 @@ def _fetch_invitations_sync(current_user: int) -> dict:
             .all()
         )
         return {
-            "shared_user_invitations": [
-                {"vm_id": e.vm_id, "vm_name": vm.vm_name, "owner_name": owner.username,
-                 "owner_email": owner.email, "status": e.status,
-                 "invited_at": e.created_at.isoformat() if e.created_at else None}
+            "pending_requests": [
+                {
+                    "request_type": "shared_user_invitation",
+                    "vm_id":        e.vm_id,
+                    "vm_name":      vm.vm_name,
+                    "owner_name":   owner.username,
+                    "owner_email":  owner.email,
+                    "status":       e.status,
+                    "invited_at":   e.created_at.isoformat() if e.created_at else None,
+                }
                 for e, vm, owner in shared_rows
-            ],
-            "admin_change_requests": [
-                {"vm_id": req.vm_id, "vm_name": vm.vm_name, "old_admin_name": old_admin.username,
-                 "old_admin_email": old_admin.email,
-                 "requested_at": req.created_at.isoformat() if req.created_at else None}
+            ] + [
+                {
+                    "request_type":    "admin_change_request",
+                    "vm_id":           req.vm_id,
+                    "vm_name":         vm.vm_name,
+                    "old_admin_name":  old_admin.username,
+                    "old_admin_email": old_admin.email,
+                    "requested_at":    req.created_at.isoformat() if req.created_at else None,
+                }
                 for req, vm, old_admin in admin_rows
-            ],
+            ]
         }
     finally:
         db.close()
