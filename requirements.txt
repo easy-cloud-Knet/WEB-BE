@@ -4,6 +4,7 @@ uvicorn[standard]
 mysql-connector-python
 python-jose[cryptography]
 datetime
+bcrypt
 passlib
 python-multipart
 sqlalchemy
