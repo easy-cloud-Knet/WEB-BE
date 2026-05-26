@@ -5,7 +5,7 @@ mysql-connector-python
 python-jose[cryptography]
 datetime
 bcrypt
-passlib
+passlib==3.2.2
 python-multipart
 sqlalchemy
 pymysql
