@@ -396,10 +396,44 @@ async def add_shared_user(
         exists.status = "pending"
         exists.created_at = datetime.now(timezone.utc)
         db.commit()
+
+        owner = db.query(User).filter(User.id == current_user).first()
+        redis_client.publish(
+            f"user:{user.id}:invitations",
+            json.dumps({
+                "event": "invitation",
+                "data": {
+                    "vm_id": vm_id,
+                    "vm_name": vm.vm_name,
+                    "owner_name": owner.username if owner else None,
+                    "owner_email": owner.email if owner else None,
+                    "status": "pending",
+                    "invited_at": datetime.now(timezone.utc).isoformat(),
+                }
+            })
+        )
+
         return {"msg": "Re-invitation sent (pending)"}
 
     db.add(VmSharedUsers(vm_id=vm_id, user_id=user.id, status="pending"))
     db.commit()
+
+    owner = db.query(User).filter(User.id == current_user).first()
+    redis_client.publish(
+        f"user:{user.id}:invitations",
+        json.dumps({
+            "event": "invitation",
+            "data": {
+                "vm_id": vm_id,
+                "vm_name": vm.vm_name,
+                "owner_name": owner.username if owner else None,
+                "owner_email": owner.email if owner else None,
+                "status": "pending",
+                "invited_at": datetime.now(timezone.utc).isoformat(),
+            }
+        })
+    )
+
     return {"msg": "Invitation sent (pending)"}
 
 @router.get("/shared-users/invitations", summary="나에게 온 공유 초대 및 관리자 변경 요청 목록 조회")
@@ -744,6 +778,22 @@ async def request_admin_change(
         vm_id=vm_id, old_admin_id=current_user, new_admin_id=new_admin.id, status="pending"
     ))
     db.commit()
+
+    old_admin = db.query(User).filter(User.id == current_user).first()
+    redis_client.publish(
+        f"user:{new_admin.id}:invitations",
+        json.dumps({
+            "event": "admin_req",
+            "data": {
+                "vm_id": vm_id,
+                "vm_name": vm.vm_name,
+                "old_admin_name": old_admin.username if old_admin else None,
+                "old_admin_email": old_admin.email if old_admin else None,
+                "requested_at": datetime.now(timezone.utc).isoformat(),
+            }
+        })
+    )
+
     return {"msg": f"Verification email sent to {new_admin.email}"}
 
 
