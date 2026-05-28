@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, aliased
-from app.utils.verification import get_current_user
+from app.utils.verification import get_current_user, get_current_user_from_cookie
 from app.utils.auth import send_verification_email, verify_code
 from app.utils.database.web_backend.database import get_db as get_db_web
 from app.utils.database.web_backend.models import VMs, User, VmSharedUsers, VmAdminChangeRequest
@@ -508,7 +508,7 @@ def _sse_format(event: str, data) -> str:
 @router.get("/shared-users/invitations/stream", summary="초대 실시간 스트림 (SSE)")
 async def stream_my_invitations(
     request: Request,
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user_from_cookie),
 ):
     channel = f"user:{current_user}:invitations"
 
