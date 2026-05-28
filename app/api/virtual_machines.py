@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, aliased
-from app.utils.verification import get_current_user
+from app.utils.verification import get_current_user, get_current_user_from_cookie
 from app.utils.auth import send_verification_email, verify_code
 from app.utils.database.web_backend.database import get_db as get_db_web
 from app.utils.database.web_backend.models import VMs, User, VmSharedUsers, VmAdminChangeRequest
@@ -8,11 +9,14 @@ from app.utils.database.control_to_backend.database import get_db as get_db_con2
 from app.utils.database.control_to_backend.models import InstanceTypes, OsList
 import uuid
 import redis
+import redis.asyncio as aioredis
 from pydantic import BaseModel
 from typing import List
 import requests, json
 import os
 from datetime import datetime, timedelta, timezone
+import asyncio
+
 
 REDIS_HOST = os.getenv("REDIS_HOST")
 REDIS_PORT = int(os.getenv("REDIS_PORT"))
@@ -392,10 +396,44 @@ async def add_shared_user(
         exists.status = "pending"
         exists.created_at = datetime.now(timezone.utc)
         db.commit()
+
+        owner = db.query(User).filter(User.id == current_user).first()
+        redis_client.publish(
+            f"user:{user.id}:invitations",
+            json.dumps({
+                "event": "invitation",
+                "data": {
+                    "vm_id": vm_id,
+                    "vm_name": vm.vm_name,
+                    "owner_name": owner.username if owner else None,
+                    "owner_email": owner.email if owner else None,
+                    "status": "pending",
+                    "invited_at": datetime.now(timezone.utc).isoformat(),
+                }
+            })
+        )
+
         return {"msg": "Re-invitation sent (pending)"}
 
     db.add(VmSharedUsers(vm_id=vm_id, user_id=user.id, status="pending"))
     db.commit()
+
+    owner = db.query(User).filter(User.id == current_user).first()
+    redis_client.publish(
+        f"user:{user.id}:invitations",
+        json.dumps({
+            "event": "invitation",
+            "data": {
+                "vm_id": vm_id,
+                "vm_name": vm.vm_name,
+                "owner_name": owner.username if owner else None,
+                "owner_email": owner.email if owner else None,
+                "status": "pending",
+                "invited_at": datetime.now(timezone.utc).isoformat(),
+            }
+        })
+    )
+
     return {"msg": "Invitation sent (pending)"}
 
 @router.get("/shared-users/invitations", summary="나에게 온 공유 초대 및 관리자 변경 요청 목록 조회")
@@ -430,28 +468,141 @@ async def get_my_invitations(
     )
 
     return {
-        "shared_user_invitations": [
+        "pending_requests": [
             {
-                "vm_id":        entry.vm_id,
-                "vm_name":      vm.vm_name,
-                "owner_name":   owner.username,
-                "owner_email":  owner.email,
-                "status":       entry.status,
-                "invited_at":   entry.created_at,
+                "request_type":   "shared_user_invitation",
+                "vm_id":          entry.vm_id,
+                "vm_name":        vm.vm_name,
+                "owner_name":     owner.username,
+                "owner_email":    owner.email,
+                "status":         entry.status,
+                "invited_at":     entry.created_at,
             }
             for entry, vm, owner in shared_rows
-        ],
-        "admin_change_requests": [
+        ] + [
             {
-                "vm_id":          req.vm_id,
-                "vm_name":        vm.vm_name,
-                "old_admin_name": old_admin.username,
+                "request_type":    "admin_change_request",
+                "vm_id":           req.vm_id,
+                "vm_name":         vm.vm_name,
+                "old_admin_name":  old_admin.username,
                 "old_admin_email": old_admin.email,
-                "requested_at":   req.created_at,
+                "requested_at":    req.created_at,
             }
             for req, vm, old_admin in admin_rows
-        ],
+        ]
     }
+
+## SSE invitations
+
+async_redis_client = aioredis.StrictRedis(
+    host=REDIS_HOST,
+    port=REDIS_PORT,
+    db=0,
+    decode_responses=True,
+)
+
+def _sse_format(event: str, data) -> str:
+    body = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False, default=str)
+    return f"event: {event}\ndata: {body}\n\n"
+
+@router.get("/shared-users/invitations/stream", summary="초대 실시간 스트림 (SSE)")
+async def stream_my_invitations(
+    request: Request,
+    current_user=Depends(get_current_user_from_cookie),
+):
+    channel = f"user:{current_user}:invitations"
+
+    async def event_generator():
+        pubsub = async_redis_client.pubsub()
+        await pubsub.subscribe(channel)
+        try:
+            snapshot = await asyncio.get_event_loop().run_in_executor(
+                None, _fetch_invitations_sync, current_user
+            )
+            yield _sse_format("snapshot", snapshot)
+
+            while True:
+                if await request.is_disconnected():
+                    break
+
+                message = await pubsub.get_message(       # ← 버그 3 수정
+                    ignore_subscribe_messages=True,
+                    timeout=30.0,
+                )
+
+                if message is None:
+                    yield _sse_format("ping", "")         # timeout → heartbeat
+                    continue
+
+                if message["type"] == "message":
+                    try:
+                        payload = json.loads(message["data"])
+                        yield _sse_format(payload.get("event", "invitation"), payload.get("data", {}))
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await pubsub.unsubscribe(channel)
+            await pubsub.aclose()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+    )
+
+
+def _fetch_invitations_sync(current_user: int) -> dict:
+    db = next(get_db_web())
+    try:
+        Owner = aliased(User)
+        shared_rows = (
+            db.query(VmSharedUsers, VMs, Owner)
+            .join(VMs, VmSharedUsers.vm_id == VMs.vm_id)
+            .join(Owner, VMs.owner_id == Owner.id)
+            .filter(VmSharedUsers.user_id == current_user)
+            .order_by(VmSharedUsers.created_at.desc())
+            .all()
+        )
+        OldAdmin = aliased(User)
+        admin_rows = (
+            db.query(VmAdminChangeRequest, VMs, OldAdmin)
+            .join(VMs, VmAdminChangeRequest.vm_id == VMs.vm_id)
+            .join(OldAdmin, VmAdminChangeRequest.old_admin_id == OldAdmin.id)
+            .filter(VmAdminChangeRequest.new_admin_id == current_user, VmAdminChangeRequest.status == "pending")
+            .order_by(VmAdminChangeRequest.created_at.desc())
+            .all()
+        )
+        return {
+            "pending_requests": [
+                {
+                    "request_type": "shared_user_invitation",
+                    "vm_id":        e.vm_id,
+                    "vm_name":      vm.vm_name,
+                    "owner_name":   owner.username,
+                    "owner_email":  owner.email,
+                    "status":       e.status,
+                    "invited_at":   e.created_at.isoformat() if e.created_at else None,
+                }
+                for e, vm, owner in shared_rows
+            ] + [
+                {
+                    "request_type":    "admin_change_request",
+                    "vm_id":           req.vm_id,
+                    "vm_name":         vm.vm_name,
+                    "old_admin_name":  old_admin.username,
+                    "old_admin_email": old_admin.email,
+                    "requested_at":    req.created_at.isoformat() if req.created_at else None,
+                }
+                for req, vm, old_admin in admin_rows
+            ]
+        }
+    finally:
+        db.close()
+
+
 
 @router.patch("/{vm_id}/shared-users/accept", summary="공유 초대 수락")
 async def accept_shared_user_invite(
@@ -627,6 +778,22 @@ async def request_admin_change(
         vm_id=vm_id, old_admin_id=current_user, new_admin_id=new_admin.id, status="pending"
     ))
     db.commit()
+
+    old_admin = db.query(User).filter(User.id == current_user).first()
+    redis_client.publish(
+        f"user:{new_admin.id}:invitations",
+        json.dumps({
+            "event": "admin_req",
+            "data": {
+                "vm_id": vm_id,
+                "vm_name": vm.vm_name,
+                "old_admin_name": old_admin.username if old_admin else None,
+                "old_admin_email": old_admin.email if old_admin else None,
+                "requested_at": datetime.now(timezone.utc).isoformat(),
+            }
+        })
+    )
+
     return {"msg": f"Verification email sent to {new_admin.email}"}
 
 
